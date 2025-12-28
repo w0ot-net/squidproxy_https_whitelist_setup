@@ -119,9 +119,9 @@ def check_squid_ssl_support():
 # ------------------------------------------------------------------------------
 # Installation
 # ------------------------------------------------------------------------------
-def install_squid(ssl_bump_enabled):
+def install_squid():
     """Install Squid proxy via apt-get."""
-    package = "squid-openssl" if ssl_bump_enabled else "squid"
+    package = "squid-openssl"
 
     action("Updating package lists...")
     step_delay()
@@ -136,9 +136,8 @@ def install_squid(ssl_bump_enabled):
     ret = subprocess.call(["apt-get", "install", "-y", "-qq", package])
     if ret != 0:
         error("Failed to install {0}".format(package))
-        if ssl_bump_enabled:
-            warn("squid-openssl may not be available in your repos")
-            warn("Try: apt-get install squid-openssl")
+        warn("squid-openssl may not be available in your repos")
+        warn("Try: apt-get install squid-openssl")
         sys.exit(1)
     success("{0} package installed".format(package))
 
@@ -623,7 +622,7 @@ Examples:
                 warn("Consider reinstalling with: apt install squid-openssl")
     else:
         warn("Squid not found")
-        install_squid(ssl_bump_mode != "off")
+        install_squid()
     print("")
 
     # Handle SSL Bump certificate setup
