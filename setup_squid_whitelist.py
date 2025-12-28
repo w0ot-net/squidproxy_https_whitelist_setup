@@ -463,6 +463,9 @@ acl whitelist_sni ssl::server_name {domain}
 # Peek at SNI in step 1
 ssl_bump peek step1
 
+# Stare at server certificate in step 2 (validates cert if verify mode)
+ssl_bump stare step2
+
 # Splice (passthrough) whitelisted SNI, terminate all others
 ssl_bump splice whitelist_sni
 ssl_bump terminate all
