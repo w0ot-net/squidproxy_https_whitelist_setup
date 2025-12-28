@@ -286,12 +286,13 @@ def run_server(port, cert_path, key_path, domain):
     # Build test domain (replace wildcard with www)
     test_domain = domain.replace("*.", "www.")
 
-    print("{bold}Test this server directly:{reset}".format(bold=C_BOLD, reset=C_RESET))
-    print("  {green}curl -k https://127.0.0.1:{port}/{reset}".format(
-        green=C_GREEN, reset=C_RESET, port=port))
+    print("{bold}Test this server with SNI spoofing (bypasses proxy):{reset}".format(
+        bold=C_BOLD, reset=C_RESET))
+    print("  {green}curl -k --connect-to {domain}:{port}:127.0.0.1:{port} https://{domain}/{reset}".format(
+        green=C_GREEN, reset=C_RESET, domain=test_domain, port=port))
     print("")
-    print("{bold}Test Squid SNI filtering (uses real {domain}):{reset}".format(
-        bold=C_BOLD, reset=C_RESET, domain=test_domain))
+    print("{bold}Test Squid SNI filtering (uses real sites):{reset}".format(
+        bold=C_BOLD, reset=C_RESET))
     print("  {green}curl -x http://127.0.0.1:8080 https://{domain}/  {dim}# should work{reset}".format(
         green=C_GREEN, reset=C_RESET, dim=C_DIM, domain=test_domain))
     print("  {red}curl -x http://127.0.0.1:8080 https://example.com/  {dim}# should be blocked{reset}".format(
