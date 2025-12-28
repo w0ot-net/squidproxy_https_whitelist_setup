@@ -286,17 +286,16 @@ def run_server(port, cert_path, key_path, domain):
     # Build test domain (replace wildcard with www)
     test_domain = domain.replace("*.", "www.")
 
-    print("{bold}Test directly (bypasses proxy):{reset}".format(bold=C_BOLD, reset=C_RESET))
+    print("{bold}Test this server directly:{reset}".format(bold=C_BOLD, reset=C_RESET))
     print("  {green}curl -k https://127.0.0.1:{port}/{reset}".format(
         green=C_GREEN, reset=C_RESET, port=port))
     print("")
-    print("{bold}Test via Squid proxy:{reset}".format(bold=C_BOLD, reset=C_RESET))
-    print("  {dim}Squid must whitelist 127.0.0.1 to proxy to this server:{reset}".format(
-        dim=C_DIM, reset=C_RESET))
-    print("  {yellow}sudo python3 setup_squid_whitelist.py --ssl-bump noverify -d 127.0.0.1{reset}".format(
-        yellow=C_YELLOW, reset=C_RESET))
-    print("  {green}curl -k -x http://127.0.0.1:8080 https://127.0.0.1:{port}/{reset}".format(
-        green=C_GREEN, reset=C_RESET, port=port))
+    print("{bold}Test Squid SNI filtering (uses real {domain}):{reset}".format(
+        bold=C_BOLD, reset=C_RESET, domain=test_domain))
+    print("  {green}curl -x http://127.0.0.1:8080 https://{domain}/  {dim}# should work{reset}".format(
+        green=C_GREEN, reset=C_RESET, dim=C_DIM, domain=test_domain))
+    print("  {red}curl -x http://127.0.0.1:8080 https://example.com/  {dim}# should be blocked{reset}".format(
+        red=C_RED, reset=C_RESET, dim=C_DIM))
     print("")
 
     try:
