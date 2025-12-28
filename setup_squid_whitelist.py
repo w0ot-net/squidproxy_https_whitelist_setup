@@ -3,6 +3,7 @@
 """
 Squid Proxy HTTPS Whitelist Setup
 Installs and configures Squid to whitelist a single domain.
+Supports SSL Bump peek-and-splice for HTTPS inspection.
 """
 from __future__ import print_function
 
@@ -98,11 +99,30 @@ def check_squid_installed():
     return ret == 0
 
 
+def check_squid_ssl_support():
+    """Check if installed Squid has SSL support."""
+    info("Checking Squid SSL support...")
+    step_delay()
+    try:
+        proc = subprocess.Popen(
+            ["squid", "-v"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout, _ = proc.communicate()
+        output = stdout.decode("utf-8", errors="replace")
+        return "--with-openssl" in output or "--enable-ssl" in output
+    except Exception:
+        return False
+
+
 # ------------------------------------------------------------------------------
 # Installation
 # ------------------------------------------------------------------------------
-def install_squid():
+def install_squid(ssl_bump_enabled):
     """Install Squid proxy via apt-get."""
+    package = "squid-openssl" if ssl_bump_enabled else "squid"
+
     action("Updating package lists...")
     step_delay()
     ret = subprocess.call(["apt-get", "update", "-qq"])
@@ -111,29 +131,181 @@ def install_squid():
         sys.exit(1)
     success("Package lists updated")
 
-    action("Installing squid package...")
+    action("Installing {0} package...".format(package))
     step_delay()
-    ret = subprocess.call(["apt-get", "install", "-y", "-qq", "squid"])
+    ret = subprocess.call(["apt-get", "install", "-y", "-qq", package])
     if ret != 0:
-        error("Failed to install Squid")
+        error("Failed to install {0}".format(package))
+        if ssl_bump_enabled:
+            warn("squid-openssl may not be available in your repos")
+            warn("Try: apt-get install squid-openssl")
         sys.exit(1)
-    success("Squid package installed")
+    success("{0} package installed".format(package))
+
+
+# ------------------------------------------------------------------------------
+# Certificate management
+# ------------------------------------------------------------------------------
+def get_cert_dir(script_dir):
+    """Get certificate directory, create if needed."""
+    cert_dir = os.path.join(script_dir, "certs")
+    if not os.path.exists(cert_dir):
+        os.makedirs(cert_dir)
+    return cert_dir
+
+
+def check_existing_certs(cert_dir):
+    """Check if CA certificate and key already exist."""
+    cert_path = os.path.join(cert_dir, "squid-ca-cert.pem")
+    key_path = os.path.join(cert_dir, "squid-ca-key.pem")
+    return os.path.exists(cert_path) and os.path.exists(key_path)
+
+
+def generate_ca_cert(cert_dir):
+    """Generate self-signed CA certificate using openssl."""
+    cert_path = os.path.join(cert_dir, "squid-ca-cert.pem")
+    key_path = os.path.join(cert_dir, "squid-ca-key.pem")
+
+    # Check if certs already exist
+    if check_existing_certs(cert_dir):
+        info("Existing CA certificate found")
+        success("Reusing CA from {0}".format(cert_dir))
+        return cert_path, key_path
+
+    action("Generating self-signed CA certificate...")
+    step_delay()
+
+    cmd = [
+        "openssl", "req",
+        "-new", "-newkey", "rsa:2048",
+        "-days", "365",
+        "-nodes", "-x509",
+        "-subj", "/CN=Squid Proxy CA/O=Squid Whitelist Proxy",
+        "-keyout", key_path,
+        "-out", cert_path
+    ]
+
+    ret = subprocess.call(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if ret != 0:
+        error("Failed to generate CA certificate")
+        sys.exit(1)
+
+    # Set proper permissions
+    os.chmod(key_path, 0o600)
+    os.chmod(cert_path, 0o644)
+
+    success("CA certificate generated")
+    info("  Certificate: {0}".format(cert_path))
+    info("  Private key: {0}".format(key_path))
+
+    return cert_path, key_path
+
+
+def copy_certs_to_squid(cert_path, key_path):
+    """Copy certificates to Squid directory."""
+    squid_cert_dir = "/etc/squid/certs"
+    if not os.path.exists(squid_cert_dir):
+        os.makedirs(squid_cert_dir)
+
+    dest_cert = os.path.join(squid_cert_dir, "squid-ca-cert.pem")
+    dest_key = os.path.join(squid_cert_dir, "squid-ca-key.pem")
+
+    action("Copying certificates to Squid directory...")
+    step_delay()
+
+    shutil.copy2(cert_path, dest_cert)
+    shutil.copy2(key_path, dest_key)
+
+    # Ensure Squid can read them
+    os.chmod(dest_cert, 0o644)
+    os.chmod(dest_key, 0o600)
+
+    # Change ownership to proxy user
+    try:
+        import pwd
+        proxy_uid = pwd.getpwnam("proxy").pw_uid
+        proxy_gid = pwd.getpwnam("proxy").pw_gid
+        os.chown(dest_cert, proxy_uid, proxy_gid)
+        os.chown(dest_key, proxy_uid, proxy_gid)
+        os.chown(squid_cert_dir, proxy_uid, proxy_gid)
+    except (KeyError, OSError):
+        warn("Could not set ownership to proxy user")
+
+    success("Certificates copied to {0}".format(squid_cert_dir))
+    return dest_cert, dest_key
+
+
+def init_ssl_db():
+    """Initialize Squid SSL certificate database."""
+    ssl_db_dir = "/var/lib/squid/ssl_db"
+
+    action("Initializing SSL certificate database...")
+    step_delay()
+
+    # Remove existing db if present
+    if os.path.exists(ssl_db_dir):
+        shutil.rmtree(ssl_db_dir)
+
+    # Find ssl_crtd helper location
+    ssl_crtd_paths = [
+        "/usr/lib/squid/security_file_certgen",
+        "/usr/lib64/squid/security_file_certgen",
+        "/usr/libexec/squid/security_file_certgen",
+        "/usr/lib/squid/ssl_crtd",
+        "/usr/lib64/squid/ssl_crtd"
+    ]
+
+    ssl_crtd = None
+    for path in ssl_crtd_paths:
+        if os.path.exists(path):
+            ssl_crtd = path
+            break
+
+    if ssl_crtd is None:
+        error("Could not find ssl_crtd/security_file_certgen helper")
+        error("SSL Bump may not work correctly")
+        return
+
+    # Initialize the database
+    cmd = [ssl_crtd, "-c", "-s", ssl_db_dir, "-M", "4MB"]
+    ret = subprocess.call(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if ret != 0:
+        error("Failed to initialize SSL database")
+        return
+
+    # Set ownership
+    try:
+        import pwd
+        proxy_uid = pwd.getpwnam("proxy").pw_uid
+        proxy_gid = pwd.getpwnam("proxy").pw_gid
+        for root, dirs, files in os.walk(ssl_db_dir):
+            os.chown(root, proxy_uid, proxy_gid)
+            for d in dirs:
+                os.chown(os.path.join(root, d), proxy_uid, proxy_gid)
+            for f in files:
+                os.chown(os.path.join(root, f), proxy_uid, proxy_gid)
+    except (KeyError, OSError):
+        warn("Could not set SSL database ownership")
+
+    success("SSL certificate database initialized")
 
 
 # ------------------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------------------
-def generate_config(domain, port):
+def generate_config(domain, port, ssl_bump_mode, cert_path, key_path):
     """Generate Squid configuration for domain whitelisting."""
     # Ensure domain starts with a dot for wildcard matching
     if not domain.startswith("."):
         domain = "." + domain
 
+    # Base configuration
     config = """#
 # SQUID PROXY - WHITELIST CONFIGURATION
 # Generated by setup_squid_whitelist.py
 # Whitelisted domain: {domain}
 # Listen port: {port}
+# SSL Bump: {ssl_bump_mode}
 #
 
 # ACL definitions
@@ -165,10 +337,65 @@ http_access allow whitelist_domain
 # Deny everything else
 http_access deny all
 
-# Squid listening port
+""".format(domain=domain, port=port, ssl_bump_mode=ssl_bump_mode)
+
+    # Add SSL Bump configuration if enabled
+    if ssl_bump_mode != "off":
+        ssl_config = """# ------------------------------------------------------------------------------
+# SSL BUMP CONFIGURATION
+# Mode: {mode}
+# ------------------------------------------------------------------------------
+
+# SSL Bump listening port
+http_port {port} ssl-bump \\
+    cert={cert} \\
+    key={key} \\
+    generate-host-certificates=on \\
+    dynamic_cert_mem_cache_size=4MB
+
+# SSL certificate database
+sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/lib/squid/ssl_db -M 4MB
+sslcrtd_children 5
+
+# SSL Bump ACLs
+acl step1 at_step SslBump1
+acl step2 at_step SslBump2
+acl step3 at_step SslBump3
+
+# Peek at SNI in step 1
+ssl_bump peek step1
+
+# Splice whitelisted domains, terminate others
+ssl_bump splice whitelist_domain
+ssl_bump terminate all
+
+""".format(mode=ssl_bump_mode, port=port, cert=cert_path, key=key_path)
+
+        # Certificate validation settings
+        if ssl_bump_mode == "verify":
+            ssl_config += """# Certificate validation: ENABLED
+# Invalid certificates will be rejected
+sslproxy_cert_error deny all
+
+"""
+        elif ssl_bump_mode == "noverify":
+            ssl_config += """# Certificate validation: DISABLED
+# All certificates will be accepted (insecure)
+sslproxy_cert_error allow all
+sslproxy_flags DONT_VERIFY_PEER
+
+"""
+
+        config += ssl_config
+    else:
+        # Standard port without SSL Bump
+        config += """# Squid listening port
 http_port {port}
 
-# Logging
+""".format(port=port)
+
+    # Add common footer
+    config += """# Logging
 access_log /var/log/squid/access.log squid
 cache_log /var/log/squid/cache.log
 
@@ -185,7 +412,7 @@ pid_filename /var/run/squid.pid
 
 # Visible hostname
 visible_hostname squid-whitelist-proxy
-""".format(domain=domain, port=port)
+"""
 
     return config
 
@@ -242,6 +469,7 @@ def restart_squid():
     ret = subprocess.call(["systemctl", "restart", "squid"])
     if ret != 0:
         error("Failed to restart Squid")
+        error("Check config: squid -k parse")
         sys.exit(1)
     success("Squid service restarted")
 
@@ -274,7 +502,7 @@ def enable_squid():
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
-def print_summary(domain, port):
+def print_summary(domain, port, ssl_bump_mode, cert_path):
     """Print configuration summary."""
     print("")
     print("{bold}{green}".format(bold=C_BOLD, green=C_GREEN) + "=" * 60 + C_RESET)
@@ -286,12 +514,34 @@ def print_summary(domain, port):
         cyan=C_CYAN, reset=C_RESET, port=port))
     print("  {cyan}Whitelisted:{reset}    *{domain}".format(
         cyan=C_CYAN, reset=C_RESET, domain=domain))
+
+    if ssl_bump_mode == "off":
+        print("  {cyan}SSL Bump:{reset}       {dim}disabled{reset}".format(
+            cyan=C_CYAN, reset=C_RESET, dim=C_DIM))
+    elif ssl_bump_mode == "verify":
+        print("  {cyan}SSL Bump:{reset}       {green}verify{reset} (certificate validation ON)".format(
+            cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
+        print("  {cyan}CA Certificate:{reset} {cert}".format(
+            cyan=C_CYAN, reset=C_RESET, cert=cert_path))
+    elif ssl_bump_mode == "noverify":
+        print("  {cyan}SSL Bump:{reset}       {yellow}noverify{reset} (certificate validation OFF)".format(
+            cyan=C_CYAN, reset=C_RESET, yellow=C_YELLOW))
+        print("  {cyan}CA Certificate:{reset} {cert}".format(
+            cyan=C_CYAN, reset=C_RESET, cert=cert_path))
+
     print("")
     print("  {dim}Test commands:{reset}".format(dim=C_DIM, reset=C_RESET))
     print("  {green}curl -x http://localhost:{port} https://www{domain}{reset}".format(
         green=C_GREEN, reset=C_RESET, port=port, domain=domain))
     print("  {red}curl -x http://localhost:{port} https://example.com  # blocked{reset}".format(
         red=C_RED, reset=C_RESET, port=port))
+
+    if ssl_bump_mode != "off":
+        print("")
+        print("  {dim}To trust the CA on clients, install:{reset}".format(
+            dim=C_DIM, reset=C_RESET))
+        print("  {cyan}{cert}{reset}".format(cyan=C_CYAN, reset=C_RESET, cert=cert_path))
+
     print("")
 
 
@@ -304,6 +554,8 @@ def main():
 Examples:
   sudo python {0} --domain .google.com --port 8080
   sudo python {0} -d .github.com -p 3128
+  sudo python {0} --ssl-bump verify
+  sudo python {0} --ssl-bump noverify --ca-cert /path/to/cert.pem --ca-key /path/to/key.pem
         """.format(sys.argv[0])
     )
     parser.add_argument(
@@ -317,9 +569,23 @@ Examples:
         default=8080,
         help="Proxy listen port (default: 8080)"
     )
+    parser.add_argument(
+        "--ssl-bump",
+        choices=["off", "verify", "noverify"],
+        default="off",
+        help="SSL Bump mode: off, verify (validate certs), noverify (accept any cert)"
+    )
+    parser.add_argument(
+        "--ca-cert",
+        help="Path to CA certificate (optional, auto-generated if not provided)"
+    )
+    parser.add_argument(
+        "--ca-key",
+        help="Path to CA private key (optional, auto-generated if not provided)"
+    )
     args = parser.parse_args()
 
-    # Get script directory for local config copy
+    # Get script directory for local config/cert copy
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Ensure domain format
@@ -327,34 +593,90 @@ Examples:
     if not domain.startswith("."):
         domain = "." + domain
 
+    ssl_bump_mode = args.ssl_bump
+    cert_path = None
+    key_path = None
+
     # Run setup
     banner()
     print("")
 
     info("Target domain: *{0}".format(domain))
     info("Listen port: {0}".format(args.port))
+    if ssl_bump_mode != "off":
+        info("SSL Bump mode: {0}".format(ssl_bump_mode))
     print("")
 
     check_root()
     print("")
 
-    if check_squid_installed():
+    # Check/install Squid
+    squid_installed = check_squid_installed()
+    if squid_installed:
         success("Squid already installed")
+        # Check SSL support if SSL Bump enabled
+        if ssl_bump_mode != "off":
+            if check_squid_ssl_support():
+                success("SSL support confirmed")
+            else:
+                warn("Installed Squid may lack SSL support")
+                warn("Consider reinstalling with: apt install squid-openssl")
     else:
         warn("Squid not found")
-        install_squid()
+        install_squid(ssl_bump_mode != "off")
     print("")
 
+    # Handle SSL Bump certificate setup
+    if ssl_bump_mode != "off":
+        info("Setting up SSL Bump certificates...")
+        print("")
+
+        if args.ca_cert and args.ca_key:
+            # User-provided certificates
+            if not os.path.exists(args.ca_cert):
+                error("CA certificate not found: {0}".format(args.ca_cert))
+                sys.exit(1)
+            if not os.path.exists(args.ca_key):
+                error("CA key not found: {0}".format(args.ca_key))
+                sys.exit(1)
+            info("Using user-provided certificates")
+            cert_path = args.ca_cert
+            key_path = args.ca_key
+        else:
+            # Auto-generate certificates
+            cert_dir = get_cert_dir(script_dir)
+            cert_path, key_path = generate_ca_cert(cert_dir)
+
+        # Copy certs to Squid directory
+        squid_cert, squid_key = copy_certs_to_squid(cert_path, key_path)
+        print("")
+
+        # Initialize SSL database
+        init_ssl_db()
+        print("")
+
+        # Use Squid-directory paths in config
+        cert_path = squid_cert
+        key_path = squid_key
+
+    # Generate and write configuration
     backup_config()
-    config = generate_config(domain, args.port)
+    config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path)
     write_config(config, script_dir)
     print("")
 
+    # Restart and verify
     restart_squid()
     enable_squid()
     verify_squid()
 
-    print_summary(domain, args.port)
+    # Get original cert path for display (from certs dir, not /etc/squid)
+    display_cert = None
+    if ssl_bump_mode != "off":
+        cert_dir = get_cert_dir(script_dir)
+        display_cert = os.path.join(cert_dir, "squid-ca-cert.pem")
+
+    print_summary(domain, args.port, ssl_bump_mode, display_cert)
 
 
 if __name__ == "__main__":
