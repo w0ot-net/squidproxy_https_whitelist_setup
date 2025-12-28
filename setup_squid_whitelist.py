@@ -361,11 +361,20 @@ def init_ssl_db():
 # ------------------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------------------
-def generate_config(domain, port, ssl_bump_mode, cert_path, key_path, ssl_crtd_path=None):
+def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
+                    ssl_crtd_path=None, extra_ssl_ports=None):
     """Generate Squid configuration for domain whitelisting."""
     # Ensure domain starts with a dot for wildcard matching
     if not domain.startswith("."):
         domain = "." + domain
+
+    # Build SSL ports list
+    ssl_ports_lines = "acl SSL_ports port 443"
+    safe_ports_lines = "acl Safe_ports port 80\nacl Safe_ports port 443"
+    if extra_ssl_ports:
+        for ssl_port in extra_ssl_ports:
+            ssl_ports_lines += "\nacl SSL_ports port {0}".format(ssl_port)
+            safe_ports_lines += "\nacl Safe_ports port {0}".format(ssl_port)
 
     # Base configuration
     config = """#
@@ -383,9 +392,8 @@ acl localnet src 192.168.0.0/16
 acl localnet src fc00::/7
 acl localnet src fe80::/10
 
-acl SSL_ports port 443
-acl Safe_ports port 80
-acl Safe_ports port 443
+{ssl_ports}
+{safe_ports}
 acl CONNECT method CONNECT
 
 # Whitelist domain ACL
@@ -405,7 +413,8 @@ http_access allow whitelist_domain
 # Deny everything else
 http_access deny all
 
-""".format(domain=domain, port=port, ssl_bump_mode=ssl_bump_mode)
+""".format(domain=domain, port=port, ssl_bump_mode=ssl_bump_mode,
+           ssl_ports=ssl_ports_lines, safe_ports=safe_ports_lines)
 
     # Add SSL Bump configuration if enabled
     if ssl_bump_mode != "off":
@@ -624,7 +633,8 @@ Examples:
   sudo python {0} --domain .google.com --port 8080
   sudo python {0} -d .github.com -p 3128
   sudo python {0} --ssl-bump verify
-  sudo python {0} --ssl-bump noverify --ca-cert /path/to/cert.pem --ca-key /path/to/key.pem
+  sudo python {0} --ssl-bump noverify --ssl-port 8443
+  sudo python {0} --ssl-bump noverify --ssl-port 8443 --ssl-port 9443
         """.format(sys.argv[0])
     )
     parser.add_argument(
@@ -651,6 +661,12 @@ Examples:
     parser.add_argument(
         "--ca-key",
         help="Path to CA private key (optional, auto-generated if not provided)"
+    )
+    parser.add_argument(
+        "--ssl-port",
+        type=int,
+        action="append",
+        help="Additional SSL port to allow (can be specified multiple times)"
     )
     args = parser.parse_args()
 
@@ -732,7 +748,8 @@ Examples:
 
     # Generate and write configuration
     backup_config()
-    config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path, ssl_crtd_path)
+    config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path,
+                             ssl_crtd_path, args.ssl_port)
     write_config(config, script_dir)
     print("")
 

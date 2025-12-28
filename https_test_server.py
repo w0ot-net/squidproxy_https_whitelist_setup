@@ -287,15 +287,15 @@ def run_server(port, cert_path, key_path, domain):
     test_domain = domain.replace("*.", "www.")
 
     print("{bold}Test via Squid proxy:{reset}".format(bold=C_BOLD, reset=C_RESET))
-    print("  {green}curl -x http://localhost:8080 \\{reset}".format(green=C_GREEN, reset=C_RESET))
-    print("       {green}--resolve {domain}:{port}:127.0.0.1 \\{reset}".format(
-        green=C_GREEN, reset=C_RESET, domain=test_domain, port=port))
-    print("       {green}https://{domain}:{port}/{reset}".format(
+    print("  {green}curl -k -x http://localhost:8080 --resolve {domain}:{port}:127.0.0.1 https://{domain}:{port}/{reset}".format(
         green=C_GREEN, reset=C_RESET, domain=test_domain, port=port))
     print("")
-    print("{dim}  (--resolve forces {domain} to resolve to localhost){reset}".format(
-        dim=C_DIM, reset=C_RESET, domain=test_domain))
-    print("")
+    if port != 443:
+        print("{yellow}  NOTE: Squid must allow port {port} in SSL_ports ACL{reset}".format(
+            yellow=C_YELLOW, reset=C_RESET, port=port))
+        print("{yellow}  Re-run setup_squid_whitelist.py with: --ssl-port {port}{reset}".format(
+            yellow=C_YELLOW, reset=C_RESET, port=port))
+        print("")
 
     try:
         httpd.serve_forever()
