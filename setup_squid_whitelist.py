@@ -521,9 +521,13 @@ visible_hostname squid-whitelist-proxy
 
 
 def backup_config():
-    """Backup existing Squid configuration."""
+    """Backup existing Squid configuration (only if backup doesn't exist)."""
     squid_conf = "/etc/squid/squid.conf"
     backup_path = "/etc/squid/squid.conf.bak"
+
+    if os.path.exists(backup_path):
+        info("Backup already exists: {0}".format(backup_path))
+        return
 
     if os.path.exists(squid_conf):
         info("Backing up existing configuration...")
