@@ -234,6 +234,69 @@ def copy_certs_to_squid(cert_path, key_path):
     return dest_cert, dest_key
 
 
+def find_ssl_crtd():
+    """Find the SSL certificate generator helper binary."""
+    # Known paths for ssl_crtd/security_file_certgen
+    known_paths = [
+        "/usr/lib/squid/security_file_certgen",
+        "/usr/lib64/squid/security_file_certgen",
+        "/usr/libexec/squid/security_file_certgen",
+        "/usr/lib/squid/ssl_crtd",
+        "/usr/lib64/squid/ssl_crtd",
+        "/usr/lib/squid3/security_file_certgen",
+        "/usr/lib/squid3/ssl_crtd",
+        "/usr/local/squid/libexec/security_file_certgen",
+        "/usr/local/libexec/squid/security_file_certgen",
+    ]
+
+    # Check known paths first
+    for path in known_paths:
+        if os.path.exists(path):
+            return path
+
+    # Try to find it dynamically
+    search_dirs = ["/usr/lib", "/usr/lib64", "/usr/libexec", "/usr/local"]
+    search_names = ["security_file_certgen", "ssl_crtd"]
+
+    for search_dir in search_dirs:
+        if not os.path.exists(search_dir):
+            continue
+        for root, dirs, files in os.walk(search_dir):
+            for name in search_names:
+                if name in files:
+                    return os.path.join(root, name)
+
+    return None
+
+
+def ensure_ssl_helper_installed():
+    """Ensure SSL certificate helper is installed, reinstall squid-openssl if needed."""
+    ssl_crtd = find_ssl_crtd()
+    if ssl_crtd:
+        return ssl_crtd
+
+    warn("SSL helper not found, reinstalling squid-openssl...")
+    step_delay()
+
+    # Purge and reinstall to ensure all components are present
+    subprocess.call(
+        ["apt-get", "remove", "-y", "-qq", "squid", "squid-openssl"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE
+    )
+
+    ret = subprocess.call(["apt-get", "install", "-y", "-qq", "squid-openssl"])
+    if ret != 0:
+        error("Failed to reinstall squid-openssl")
+        return None
+
+    # Try to find it again
+    ssl_crtd = find_ssl_crtd()
+    if ssl_crtd:
+        success("SSL helper installed: {0}".format(ssl_crtd))
+    return ssl_crtd
+
+
 def init_ssl_db():
     """Initialize Squid SSL certificate database."""
     ssl_db_dir = "/var/lib/squid/ssl_db"
@@ -245,32 +308,23 @@ def init_ssl_db():
     if os.path.exists(ssl_db_dir):
         shutil.rmtree(ssl_db_dir)
 
-    # Find ssl_crtd helper location
-    ssl_crtd_paths = [
-        "/usr/lib/squid/security_file_certgen",
-        "/usr/lib64/squid/security_file_certgen",
-        "/usr/libexec/squid/security_file_certgen",
-        "/usr/lib/squid/ssl_crtd",
-        "/usr/lib64/squid/ssl_crtd"
-    ]
-
-    ssl_crtd = None
-    for path in ssl_crtd_paths:
-        if os.path.exists(path):
-            ssl_crtd = path
-            break
+    # Find or install ssl_crtd helper
+    ssl_crtd = ensure_ssl_helper_installed()
 
     if ssl_crtd is None:
         error("Could not find ssl_crtd/security_file_certgen helper")
         error("SSL Bump may not work correctly")
-        return
+        warn("Try: dpkg -L squid-openssl | grep -E '(ssl_crtd|security_file_certgen)'")
+        return None
+
+    info("Using helper: {0}".format(ssl_crtd))
 
     # Initialize the database
     cmd = [ssl_crtd, "-c", "-s", ssl_db_dir, "-M", "4MB"]
     ret = subprocess.call(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if ret != 0:
         error("Failed to initialize SSL database")
-        return
+        return ssl_crtd  # Still return path for config
 
     # Set ownership
     try:
@@ -287,12 +341,13 @@ def init_ssl_db():
         warn("Could not set SSL database ownership")
 
     success("SSL certificate database initialized")
+    return ssl_crtd
 
 
 # ------------------------------------------------------------------------------
 # Configuration
 # ------------------------------------------------------------------------------
-def generate_config(domain, port, ssl_bump_mode, cert_path, key_path):
+def generate_config(domain, port, ssl_bump_mode, cert_path, key_path, ssl_crtd_path=None):
     """Generate Squid configuration for domain whitelisting."""
     # Ensure domain starts with a dot for wildcard matching
     if not domain.startswith("."):
@@ -353,7 +408,7 @@ http_port {port} ssl-bump \\
     dynamic_cert_mem_cache_size=4MB
 
 # SSL certificate database
-sslcrtd_program /usr/lib/squid/security_file_certgen -s /var/lib/squid/ssl_db -M 4MB
+sslcrtd_program {ssl_crtd} -s /var/lib/squid/ssl_db -M 4MB
 sslcrtd_children 5
 
 # SSL Bump ACLs
@@ -368,7 +423,8 @@ ssl_bump peek step1
 ssl_bump splice whitelist_domain
 ssl_bump terminate all
 
-""".format(mode=ssl_bump_mode, port=port, cert=cert_path, key=key_path)
+""".format(mode=ssl_bump_mode, port=port, cert=cert_path, key=key_path,
+           ssl_crtd=ssl_crtd_path or "/usr/lib/squid/security_file_certgen")
 
         # Certificate validation settings
         if ssl_bump_mode == "verify":
@@ -651,16 +707,18 @@ Examples:
         print("")
 
         # Initialize SSL database
-        init_ssl_db()
+        ssl_crtd_path = init_ssl_db()
         print("")
 
         # Use Squid-directory paths in config
         cert_path = squid_cert
         key_path = squid_key
+    else:
+        ssl_crtd_path = None
 
     # Generate and write configuration
     backup_config()
-    config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path)
+    config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path, ssl_crtd_path)
     write_config(config, script_dir)
     print("")
 
