@@ -60,6 +60,18 @@ def action(msg):
     print("{cyan}[>]{reset} {msg}".format(cyan=C_CYAN, reset=C_RESET, msg=msg))
 
 
+def get_html_template_path():
+    """Get the path to the HTML template file."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(script_dir, "html", "test_page.html")
+
+
+def load_html_template():
+    """Load the HTML template from file."""
+    with open(get_html_template_path(), "r") as f:
+        return f.read()
+
+
 def log_request(method, path, client_ip):
     """Log incoming request."""
     print("{dim}[*]{reset} {method} {path} from {ip}".format(
@@ -155,78 +167,8 @@ class TestHTTPRequestHandler(BaseHTTPRequestHandler):
         # Get timestamp
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Build HTML response
-        html = """<!DOCTYPE html>
-<html>
-<head>
-    <title>HTTPS Test Server</title>
-    <style>
-        body {{
-            font-family: 'Courier New', monospace;
-            background: #0a0a0a;
-            color: #00ff00;
-            padding: 20px;
-            margin: 0;
-        }}
-        h1 {{
-            color: #00ff00;
-            border-bottom: 1px solid #00ff00;
-            padding-bottom: 10px;
-        }}
-        .section {{
-            background: #1a1a1a;
-            border: 1px solid #333;
-            padding: 15px;
-            margin: 10px 0;
-            border-radius: 4px;
-        }}
-        .label {{
-            color: #00cccc;
-        }}
-        .value {{
-            color: #ffffff;
-        }}
-        pre {{
-            margin: 0;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }}
-        .success {{
-            color: #00ff00;
-        }}
-    </style>
-</head>
-<body>
-    <h1>[+] HTTPS Test Server</h1>
-
-    <div class="section">
-        <span class="label">Status:</span>
-        <span class="success">Connection successful via HTTPS</span>
-    </div>
-
-    <div class="section">
-        <pre>
-<span class="label">Request Info:</span>
-    <span class="label">Path:</span>    <span class="value">{path}</span>
-    <span class="label">Method:</span>  <span class="value">{method}</span>
-    <span class="label">Client:</span>  <span class="value">{client_ip}</span>
-    <span class="label">Time:</span>    <span class="value">{timestamp}</span>
-
-<span class="label">Server Info:</span>
-    <span class="label">Domain:</span>  <span class="value">{domain}</span>
-    <span class="label">Port:</span>    <span class="value">{port}</span>
-
-<span class="label">Request Headers:</span>
-{headers}</pre>
-    </div>
-
-    <div class="section">
-        <span class="label">Proxy Test:</span>
-        <span class="value">If you see this page, the proxy is working correctly!</span>
-    </div>
-</body>
-</html>
-""".format(
+        # Load and fill HTML template
+        html = load_html_template().format(
             path=self.path,
             method=self.command,
             client_ip=client_ip,
