@@ -300,9 +300,14 @@ def ensure_ssl_helper_installed():
 def init_ssl_db():
     """Initialize Squid SSL certificate database."""
     ssl_db_dir = "/var/lib/squid/ssl_db"
+    squid_lib_dir = "/var/lib/squid"
 
     action("Initializing SSL certificate database...")
     step_delay()
+
+    # Ensure parent directory exists
+    if not os.path.exists(squid_lib_dir):
+        os.makedirs(squid_lib_dir)
 
     # Remove existing db if present
     if os.path.exists(ssl_db_dir):
@@ -321,9 +326,18 @@ def init_ssl_db():
 
     # Initialize the database
     cmd = [ssl_crtd, "-c", "-s", ssl_db_dir, "-M", "4MB"]
-    ret = subprocess.call(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if ret != 0:
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    stdout, stderr = proc.communicate()
+    if proc.returncode != 0:
         error("Failed to initialize SSL database")
+        if stderr:
+            err_msg = stderr.decode("utf-8", errors="replace").strip()
+            if err_msg:
+                error("  {0}".format(err_msg))
+        if stdout:
+            out_msg = stdout.decode("utf-8", errors="replace").strip()
+            if out_msg:
+                info("  {0}".format(out_msg))
         return ssl_crtd  # Still return path for config
 
     # Set ownership
