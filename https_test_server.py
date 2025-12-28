@@ -316,16 +316,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python {0}
-  python {0} --port 443 --domain www.google.com
+  sudo python {0}
+  sudo python {0} --domain www.example.com
+  python {0} --port 8443 --domain www.google.com
   python {0} --cert /path/to/cert.pem --key /path/to/key.pem
         """.format(sys.argv[0])
     )
     parser.add_argument(
         "-p", "--port",
         type=int,
-        default=8443,
-        help="Listen port (default: 8443)"
+        default=443,
+        help="Listen port (default: 443, requires root)"
     )
     parser.add_argument(
         "-d", "--domain",
