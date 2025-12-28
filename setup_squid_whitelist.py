@@ -595,17 +595,6 @@ def verify_squid():
     success("Squid is active and running")
 
 
-def enable_squid():
-    """Enable Squid to start on boot."""
-    action("Enabling Squid on system startup...")
-    step_delay()
-    ret = subprocess.call(["systemctl", "enable", "squid"], stderr=subprocess.PIPE)
-    if ret == 0:
-        success("Squid enabled on boot")
-    else:
-        warn("Could not enable Squid on boot")
-
-
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
@@ -784,7 +773,6 @@ Examples:
 
     # Restart and verify
     restart_squid()
-    enable_squid()
     verify_squid()
 
     # Get original cert path for display (from certs dir, not /etc/squid)
