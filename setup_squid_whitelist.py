@@ -463,16 +463,22 @@ acl whitelist_sni ssl::server_name {domain}
 # Peek at SNI in step 1
 ssl_bump peek step1
 
-# Stare at server certificate in step 2 (validates cert if verify mode)
-ssl_bump stare step2
-
-# Splice (passthrough) whitelisted SNI, terminate all others
-ssl_bump splice whitelist_sni
-ssl_bump terminate all
-
 """.format(mode=ssl_bump_mode, port=port, cert=cert_path, key=key_path,
            ssl_crtd=ssl_crtd_path or "/usr/lib/squid/security_file_certgen",
            domain=domain)
+
+        # Only stare at cert in verify mode
+        if ssl_bump_mode == "verify":
+            ssl_config += """# Stare at server certificate in step 2 (validates cert)
+ssl_bump stare step2
+
+"""
+
+        ssl_config += """# Splice (passthrough) whitelisted SNI, terminate all others
+ssl_bump splice whitelist_sni
+ssl_bump terminate all
+
+"""
 
         # Certificate validation settings
         if ssl_bump_mode == "verify":
