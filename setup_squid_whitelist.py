@@ -387,6 +387,19 @@ def find_ca_trust_sources():
         "/etc/ssl/certs",
         "/etc/pki/tls/certs",
     ]
+    try:
+        import ssl
+        default_paths = ssl.get_default_verify_paths()
+        for attr in ("cafile", "openssl_cafile"):
+            path = getattr(default_paths, attr, None)
+            if path and path not in cafile_candidates:
+                cafile_candidates.append(path)
+        for attr in ("capath", "openssl_capath"):
+            path = getattr(default_paths, attr, None)
+            if path and path not in capath_candidates:
+                capath_candidates.append(path)
+    except Exception:
+        pass
     cafile = None
     for path in cafile_candidates:
         if os.path.isfile(path):
@@ -673,16 +686,25 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
     elif ssl_bump_mode == "verify-no-mitm":
         print("  {cyan}SSL Bump:{reset}       {green}verify-no-mitm{reset} (splice with validation, no MITM)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
-        print("  {cyan}TLS Validation:{reset} client side".format(
-            cyan=C_CYAN, reset=C_RESET))
+        if trust_sources:
+            print("  {cyan}TLS Validation:{reset} proxy side".format(
+                cyan=C_CYAN, reset=C_RESET))
+            print("  {cyan}Outgoing TLS Trust:{reset} {sources}".format(
+                cyan=C_CYAN, reset=C_RESET, sources=", ".join(trust_sources)))
+        else:
+            print("  {cyan}TLS Validation:{reset} {yellow}disabled (no CA trust found){reset}".format(
+                cyan=C_CYAN, reset=C_RESET, yellow=C_YELLOW))
     elif ssl_bump_mode == "verify-mitm":
-        print("  {cyan}SSL Bump:{reset}       {green}verify-mitm{reset} (certificate validation ON, MITM)".format(
+        print("  {cyan}SSL Bump:{reset}       {green}verify-mitm{reset} (MITM with validation)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
         print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
             cyan=C_CYAN, reset=C_RESET, cert=cert_path))
         if trust_sources:
             print("  {cyan}Outgoing TLS Trust:{reset} {sources}".format(
                 cyan=C_CYAN, reset=C_RESET, sources=", ".join(trust_sources)))
+        else:
+            print("  {cyan}Outgoing TLS Trust:{reset} {yellow}not configured{reset}".format(
+                cyan=C_CYAN, reset=C_RESET, yellow=C_YELLOW))
     elif ssl_bump_mode == "noverify":
         print("  {cyan}SSL Bump:{reset}       {yellow}noverify{reset} (certificate validation OFF, MITM)".format(
             cyan=C_CYAN, reset=C_RESET, yellow=C_YELLOW))
@@ -752,6 +774,14 @@ Examples:
     parser.add_argument(
         "--ca-key",
         help="Path to CA private key (optional, auto-generated if not provided)"
+    )
+    parser.add_argument(
+        "--tls-ca-file",
+        help="Path to CA bundle for outbound TLS validation (optional)"
+    )
+    parser.add_argument(
+        "--tls-ca-path",
+        help="Path to CA directory for outbound TLS validation (optional)"
     )
     parser.add_argument(
         "--ssl-port",
@@ -838,12 +868,31 @@ Examples:
     else:
         ssl_crtd_path = None
 
-    if ssl_bump_mode == "verify-mitm":
-        cafile, capath, trust_sources = find_ca_trust_sources()
-        if trust_sources:
-            info("Using system CA trust: {0}".format(", ".join(trust_sources)))
+    if args.tls_ca_file and not os.path.isfile(args.tls_ca_file):
+        error("TLS CA file not found: {0}".format(args.tls_ca_file))
+        sys.exit(1)
+    if args.tls_ca_path and not os.path.isdir(args.tls_ca_path):
+        error("TLS CA path not found: {0}".format(args.tls_ca_path))
+        sys.exit(1)
+
+    verify_modes = ("verify-no-mitm", "verify-mitm")
+    if ssl_bump_mode in verify_modes:
+        if args.tls_ca_file or args.tls_ca_path:
+            cafile = args.tls_ca_file
+            capath = args.tls_ca_path
+            trust_sources = []
+            if cafile:
+                trust_sources.append("cafile={0}".format(cafile))
+            if capath:
+                trust_sources.append("capath={0}".format(capath))
+            info("Using provided CA trust: {0}".format(", ".join(trust_sources)))
         else:
-            warn("System CA trust not found; TLS validation may fail")
+            cafile, capath, trust_sources = find_ca_trust_sources()
+            if trust_sources:
+                info("Using system CA trust: {0}".format(", ".join(trust_sources)))
+            else:
+                warn("System CA trust not found; TLS validation may be disabled")
+                warn("Install ca-certificates or pass --tls-ca-file/--tls-ca-path")
 
     # Generate and write configuration
     backup_config()
