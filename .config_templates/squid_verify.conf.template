@@ -65,8 +65,8 @@ acl whitelist_sni ssl::server_name {domain_acl}
 # Peek at SNI in step 1
 ssl_bump peek step1
 
-# Bump (MITM) whitelisted SNI, terminate all others
-ssl_bump bump whitelist_sni
+# Splice (passthrough) whitelisted SNI, terminate all others
+ssl_bump splice whitelist_sni
 ssl_bump terminate all
 
 # Certificate validation: ENABLED
