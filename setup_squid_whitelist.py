@@ -421,6 +421,13 @@ def build_domain_variants(domain):
     return wildcard, apex, domain_acl, display
 
 
+def normalize_ssl_bump_mode(mode):
+    """Normalize ssl bump mode, keeping backwards-compatible aliases."""
+    if mode == "verify":
+        return "verify-no-mitm"
+    return mode
+
+
 def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
                     ssl_crtd_path=None, extra_ssl_ports=None, cafile=None,
                     capath=None):
@@ -460,7 +467,7 @@ def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
         "tls_outgoing_options": tls_outgoing_options,
     }
 
-    # Add SSL-specific values for verify/noverify modes
+    # Add SSL-specific values for ssl_bump modes
     if ssl_bump_mode != "off":
         values["cert"] = cert_path
         values["key"] = key_path
@@ -660,11 +667,21 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
     print("  {cyan}Whitelisted:{reset}    {display}".format(
         cyan=C_CYAN, reset=C_RESET, display=domain_display))
 
+    mitm_modes = ("verify-mitm", "noverify")
+
     if ssl_bump_mode == "off":
         print("  {cyan}SSL Bump:{reset}       {dim}disabled{reset}".format(
             cyan=C_CYAN, reset=C_RESET, dim=C_DIM))
-    elif ssl_bump_mode == "verify":
-        print("  {cyan}SSL Bump:{reset}       {green}verify{reset} (splice only, no MITM)".format(
+    elif ssl_bump_mode == "verify-no-mitm":
+        print("  {cyan}SSL Bump:{reset}       {green}verify-no-mitm{reset} (certificate validation ON, no MITM)".format(
+            cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
+        print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
+            cyan=C_CYAN, reset=C_RESET, cert=cert_path))
+        if trust_sources:
+            print("  {cyan}Outgoing TLS Trust:{reset} {sources}".format(
+                cyan=C_CYAN, reset=C_RESET, sources=", ".join(trust_sources)))
+    elif ssl_bump_mode == "verify-mitm":
+        print("  {cyan}SSL Bump:{reset}       {green}verify-mitm{reset} (certificate validation ON, MITM)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
         print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
             cyan=C_CYAN, reset=C_RESET, cert=cert_path))
@@ -672,7 +689,7 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
             print("  {cyan}Outgoing TLS Trust:{reset} {sources}".format(
                 cyan=C_CYAN, reset=C_RESET, sources=", ".join(trust_sources)))
     elif ssl_bump_mode == "noverify":
-        print("  {cyan}SSL Bump:{reset}       {yellow}noverify{reset} (certificate validation OFF)".format(
+        print("  {cyan}SSL Bump:{reset}       {yellow}noverify{reset} (certificate validation OFF, MITM)".format(
             cyan=C_CYAN, reset=C_RESET, yellow=C_YELLOW))
         print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
             cyan=C_CYAN, reset=C_RESET, cert=cert_path))
@@ -686,7 +703,7 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
     print("  {red}curl -x http://localhost:{port} https://example.net  # blocked{reset}".format(
         red=C_RED, reset=C_RESET, port=port))
 
-    if ssl_bump_mode != "off":
+    if ssl_bump_mode in mitm_modes:
         print("")
         print("  {dim}To trust the CA on clients, install:{reset}".format(
             dim=C_DIM, reset=C_RESET))
@@ -704,7 +721,8 @@ def main():
 Examples:
   sudo python {0} --domain .google.com --port 8080
   sudo python {0} -d .github.com -p 3128
-  sudo python {0} --ssl-bump verify
+  sudo python {0} --ssl-bump verify-no-mitm
+  sudo python {0} --ssl-bump verify-mitm
   sudo python {0} --ssl-bump noverify --ssl-port 8443
   sudo python {0} --ssl-bump noverify --ssl-port 8443 --ssl-port 9443
         """.format(sys.argv[0])
@@ -722,9 +740,9 @@ Examples:
     )
     parser.add_argument(
         "--ssl-bump",
-        choices=["off", "verify", "noverify"],
+        choices=["off", "verify-no-mitm", "verify-mitm", "noverify", "verify"],
         default="off",
-        help="SSL Bump mode: off, verify (validate certs), noverify (accept any cert)"
+        help="SSL Bump mode: off, verify-no-mitm, verify-mitm, noverify (verify is alias for verify-no-mitm)"
     )
     parser.add_argument(
         "--ca-cert",
@@ -748,7 +766,7 @@ Examples:
     # Ensure domain format
     domain, _, _, domain_display = build_domain_variants(args.domain)
 
-    ssl_bump_mode = args.ssl_bump
+    ssl_bump_mode = normalize_ssl_bump_mode(args.ssl_bump)
     cert_path = None
     key_path = None
     cafile = None
@@ -819,7 +837,7 @@ Examples:
     else:
         ssl_crtd_path = None
 
-    if ssl_bump_mode == "verify":
+    if ssl_bump_mode in ("verify-mitm", "verify-no-mitm"):
         cafile, capath, trust_sources = find_ca_trust_sources()
         if trust_sources:
             info("Using system CA trust: {0}".format(", ".join(trust_sources)))
