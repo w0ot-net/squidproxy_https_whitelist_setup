@@ -3,7 +3,7 @@
 """
 Squid Proxy HTTPS Whitelist Setup
 Installs and configures Squid to whitelist a single domain.
-Supports SSL Bump peek-and-splice for HTTPS inspection.
+Supports SSL Bump peek-and-bump for HTTPS inspection.
 """
 from __future__ import print_function
 
