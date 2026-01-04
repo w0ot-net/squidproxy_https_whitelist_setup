@@ -422,9 +422,7 @@ def build_domain_variants(domain):
 
 
 def normalize_ssl_bump_mode(mode):
-    """Normalize ssl bump mode, keeping backwards-compatible aliases."""
-    if mode == "verify":
-        return "verify-no-mitm"
+    """Normalize ssl bump mode."""
     return mode
 
 
@@ -737,11 +735,10 @@ Examples:
     )
     parser.add_argument(
         "--ssl-bump",
-        choices=["off", "verify-no-mitm", "verify-mitm", "noverify", "verify"],
+        choices=["off", "verify-no-mitm", "verify-mitm", "noverify"],
         default="off",
         help=("SSL Bump mode: off, verify-no-mitm (splice only), "
-              "verify-mitm (MITM with validation), noverify (MITM without validation); "
-              "verify is alias for verify-no-mitm")
+              "verify-mitm (MITM with validation), noverify (MITM without validation)")
     )
     parser.add_argument(
         "--ca-cert",
