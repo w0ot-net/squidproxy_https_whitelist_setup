@@ -673,13 +673,10 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
         print("  {cyan}SSL Bump:{reset}       {dim}disabled{reset}".format(
             cyan=C_CYAN, reset=C_RESET, dim=C_DIM))
     elif ssl_bump_mode == "verify-no-mitm":
-        print("  {cyan}SSL Bump:{reset}       {green}verify-no-mitm{reset} (certificate validation ON, no MITM)".format(
+        print("  {cyan}SSL Bump:{reset}       {green}verify-no-mitm{reset} (splice only, no MITM)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
-        print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
-            cyan=C_CYAN, reset=C_RESET, cert=cert_path))
-        if trust_sources:
-            print("  {cyan}Outgoing TLS Trust:{reset} {sources}".format(
-                cyan=C_CYAN, reset=C_RESET, sources=", ".join(trust_sources)))
+        print("  {cyan}TLS Validation:{reset} client side".format(
+            cyan=C_CYAN, reset=C_RESET))
     elif ssl_bump_mode == "verify-mitm":
         print("  {cyan}SSL Bump:{reset}       {green}verify-mitm{reset} (certificate validation ON, MITM)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
@@ -742,7 +739,9 @@ Examples:
         "--ssl-bump",
         choices=["off", "verify-no-mitm", "verify-mitm", "noverify", "verify"],
         default="off",
-        help="SSL Bump mode: off, verify-no-mitm, verify-mitm, noverify (verify is alias for verify-no-mitm)"
+        help=("SSL Bump mode: off, verify-no-mitm (splice only), "
+              "verify-mitm (MITM with validation), noverify (MITM without validation); "
+              "verify is alias for verify-no-mitm")
     )
     parser.add_argument(
         "--ca-cert",
@@ -837,7 +836,7 @@ Examples:
     else:
         ssl_crtd_path = None
 
-    if ssl_bump_mode in ("verify-mitm", "verify-no-mitm"):
+    if ssl_bump_mode == "verify-mitm":
         cafile, capath, trust_sources = find_ca_trust_sources()
         if trust_sources:
             info("Using system CA trust: {0}".format(", ".join(trust_sources)))
