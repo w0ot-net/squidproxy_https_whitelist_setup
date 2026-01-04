@@ -310,16 +310,9 @@ Examples:
         key_path = args.key
         info("Using provided certificate: {0}".format(cert_path))
     else:
-        # Check for existing certs
         cert_dir = get_cert_dir(script_dir)
-        info("Checking for existing certificates...")
-        cert_path, key_path = check_existing_certs(cert_dir)
-
-        if cert_path and key_path:
-            success("Found existing cert: {0}".format(cert_path))
-        else:
-            # Generate new certificate
-            cert_path, key_path = generate_cert(cert_dir, args.domain)
+        # Always generate a new certificate to match the requested domain.
+        cert_path, key_path = generate_cert(cert_dir, args.domain)
 
     print("")
 
