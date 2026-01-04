@@ -62,15 +62,9 @@ acl step3 at_step SslBump3
 # SNI-based whitelist (matches TLS Server Name Indication)
 acl whitelist_sni ssl::server_name {domain_acl}
 
-# TLS certificate validation errors
-acl server_cert_error ssl::certError
-
 # Peek at SNI in step 1 and server certificate in step 2
 ssl_bump peek step1
 ssl_bump peek step2
-
-# Terminate on invalid server certificates before splicing
-ssl_bump terminate server_cert_error
 
 # Splice (passthrough) whitelisted SNI, terminate all others
 ssl_bump splice whitelist_sni
