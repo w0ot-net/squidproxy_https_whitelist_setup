@@ -374,12 +374,26 @@ def load_template(template_name):
         return f.read()
 
 
+def build_domain_variants(domain):
+    """Normalize domain and return variants for ACLs and display."""
+    clean = domain.strip()
+    if clean.startswith("*."):
+        clean = clean[2:]
+    if clean.startswith("."):
+        clean = clean[1:]
+    apex = clean
+    if not apex:
+        return domain, "", domain, domain
+    wildcard = "." + apex
+    domain_acl = "{0} {1}".format(apex, wildcard)
+    display = "{0} and *.{0}".format(apex)
+    return wildcard, apex, domain_acl, display
+
+
 def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
                     ssl_crtd_path=None, extra_ssl_ports=None):
     """Generate Squid configuration for domain whitelisting."""
-    # Ensure domain starts with a dot for wildcard matching
-    if not domain.startswith("."):
-        domain = "." + domain
+    domain, _, domain_acl, domain_display = build_domain_variants(domain)
 
     # Build SSL ports list
     ssl_ports_lines = "acl SSL_ports port 443"
@@ -396,6 +410,8 @@ def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
     # Build substitution values
     values = {
         "domain": domain,
+        "domain_acl": domain_acl,
+        "domain_display": domain_display,
         "port": port,
         "ssl_ports": ssl_ports_lines,
         "safe_ports": safe_ports_lines,
@@ -587,6 +603,9 @@ def verify_squid():
 # ------------------------------------------------------------------------------
 def print_summary(domain, port, ssl_bump_mode, cert_path):
     """Print configuration summary."""
+    _, apex_domain, _, domain_display = build_domain_variants(domain)
+    allowed_host = apex_domain or domain.lstrip(".") or domain
+
     print("")
     print("{bold}{green}".format(bold=C_BOLD, green=C_GREEN) + "=" * 60 + C_RESET)
     print("{bold}{green}  CONFIGURATION COMPLETE{reset}".format(
@@ -595,8 +614,8 @@ def print_summary(domain, port, ssl_bump_mode, cert_path):
     print("")
     print("  {cyan}Proxy Address:{reset}  localhost:{port}".format(
         cyan=C_CYAN, reset=C_RESET, port=port))
-    print("  {cyan}Whitelisted:{reset}    *{domain}".format(
-        cyan=C_CYAN, reset=C_RESET, domain=domain))
+    print("  {cyan}Whitelisted:{reset}    {display}".format(
+        cyan=C_CYAN, reset=C_RESET, display=domain_display))
 
     if ssl_bump_mode == "off":
         print("  {cyan}SSL Bump:{reset}       {dim}disabled{reset}".format(
@@ -614,9 +633,9 @@ def print_summary(domain, port, ssl_bump_mode, cert_path):
 
     print("")
     print("  {dim}Test commands:{reset}".format(dim=C_DIM, reset=C_RESET))
-    print("  {green}curl -x http://localhost:{port} https://www{domain}{reset}".format(
-        green=C_GREEN, reset=C_RESET, port=port, domain=domain))
-    print("  {red}curl -x http://localhost:{port} https://example.com  # blocked{reset}".format(
+    print("  {green}curl -x http://localhost:{port} https://{host}{reset}".format(
+        green=C_GREEN, reset=C_RESET, port=port, host=allowed_host))
+    print("  {red}curl -x http://localhost:{port} https://example.net  # blocked{reset}".format(
         red=C_RED, reset=C_RESET, port=port))
 
     if ssl_bump_mode != "off":
@@ -679,9 +698,7 @@ Examples:
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Ensure domain format
-    domain = args.domain
-    if not domain.startswith("."):
-        domain = "." + domain
+    domain, _, _, domain_display = build_domain_variants(args.domain)
 
     ssl_bump_mode = args.ssl_bump
     cert_path = None
@@ -691,7 +708,7 @@ Examples:
     banner()
     print("")
 
-    info("Target domain: *{0}".format(domain))
+    info("Target domain: {0}".format(domain_display))
     info("Listen port: {0}".format(args.port))
     if ssl_bump_mode != "off":
         info("SSL Bump mode: {0}".format(ssl_bump_mode))
