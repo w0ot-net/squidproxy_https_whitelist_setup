@@ -697,6 +697,11 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
         green=C_GREEN, reset=C_RESET, port=port, host=allowed_host))
     print("  {red}curl -x http://localhost:{port} https://example.net  # blocked{reset}".format(
         red=C_RED, reset=C_RESET, port=port))
+    print("  {yellow}curl -v -k -x http://127.0.0.1:8080 --connect-to "
+          "www.google.com:443:127.0.0.1:443 https://www.google.com/{reset}".format(
+              yellow=C_YELLOW, reset=C_RESET))
+    print("  {dim}Explanation: uses the proxy and maps www.google.com:443 to localhost:443 for testing.{reset}".format(
+        dim=C_DIM, reset=C_RESET))
 
     if ssl_bump_mode in mitm_modes:
         print("")
