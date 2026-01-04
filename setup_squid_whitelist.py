@@ -671,7 +671,7 @@ def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
         print("  {cyan}SSL Bump:{reset}       {dim}disabled{reset}".format(
             cyan=C_CYAN, reset=C_RESET, dim=C_DIM))
     elif ssl_bump_mode == "verify-no-mitm":
-        print("  {cyan}SSL Bump:{reset}       {green}verify-no-mitm{reset} (splice only, no MITM)".format(
+        print("  {cyan}SSL Bump:{reset}       {green}verify-no-mitm{reset} (splice with validation, no MITM)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
         print("  {cyan}TLS Validation:{reset} client side".format(
             cyan=C_CYAN, reset=C_RESET))
@@ -742,7 +742,7 @@ Examples:
         "--ssl-bump",
         choices=["off", "verify-no-mitm", "verify-mitm", "noverify"],
         default="off",
-        help=("SSL Bump mode: off, verify-no-mitm (splice only), "
+        help=("SSL Bump mode: off, verify-no-mitm (splice with validation), "
               "verify-mitm (MITM with validation), noverify (MITM without validation)")
     )
     parser.add_argument(
