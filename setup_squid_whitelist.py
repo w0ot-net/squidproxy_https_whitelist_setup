@@ -891,8 +891,9 @@ Examples:
             if trust_sources:
                 info("Using system CA trust: {0}".format(", ".join(trust_sources)))
             else:
-                warn("System CA trust not found; TLS validation may be disabled")
-                warn("Install ca-certificates or pass --tls-ca-file/--tls-ca-path")
+                error("System CA trust not found; TLS validation requires system CAs")
+                error("Install ca-certificates or pass --tls-ca-file/--tls-ca-path")
+                sys.exit(1)
 
     # Generate and write configuration
     backup_config()
