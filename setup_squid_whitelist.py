@@ -374,6 +374,21 @@ def load_template(template_name):
         return f.read()
 
 
+def find_ca_bundle():
+    """Return path to the system CA bundle if found."""
+    candidates = [
+        "/etc/ssl/certs/ca-certificates.crt",
+        "/etc/pki/tls/certs/ca-bundle.crt",
+        "/etc/ssl/ca-bundle.pem",
+        "/etc/ssl/cert.pem",
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return None
+
+
 def build_domain_variants(domain):
     """Normalize domain and return variants for ACLs and display."""
     clean = domain.strip()
@@ -391,9 +406,13 @@ def build_domain_variants(domain):
 
 
 def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
-                    ssl_crtd_path=None, extra_ssl_ports=None):
+                    ssl_crtd_path=None, extra_ssl_ports=None, ca_bundle=None):
     """Generate Squid configuration for domain whitelisting."""
     domain, _, domain_acl, domain_display = build_domain_variants(domain)
+    if ca_bundle:
+        tls_outgoing_options = "tls_outgoing_options cafile={0}".format(ca_bundle)
+    else:
+        tls_outgoing_options = "# tls_outgoing_options cafile=/path/to/ca-bundle (not found)"
 
     # Build SSL ports list
     ssl_ports_lines = "acl SSL_ports port 443"
@@ -415,6 +434,7 @@ def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
         "port": port,
         "ssl_ports": ssl_ports_lines,
         "safe_ports": safe_ports_lines,
+        "tls_outgoing_options": tls_outgoing_options,
     }
 
     # Add SSL-specific values for verify/noverify modes
@@ -703,6 +723,7 @@ Examples:
     ssl_bump_mode = args.ssl_bump
     cert_path = None
     key_path = None
+    ca_bundle = None
 
     # Run setup
     banner()
@@ -768,10 +789,17 @@ Examples:
     else:
         ssl_crtd_path = None
 
+    if ssl_bump_mode == "verify":
+        ca_bundle = find_ca_bundle()
+        if ca_bundle:
+            info("Using system CA bundle: {0}".format(ca_bundle))
+        else:
+            warn("System CA bundle not found; TLS validation may fail")
+
     # Generate and write configuration
     backup_config()
     config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path,
-                             ssl_crtd_path, args.ssl_port)
+                             ssl_crtd_path, args.ssl_port, ca_bundle)
     write_config(config, script_dir)
     print("")
 

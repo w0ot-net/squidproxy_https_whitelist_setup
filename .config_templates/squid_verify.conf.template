@@ -74,6 +74,7 @@ ssl_bump terminate all
 
 # Certificate validation: ENABLED
 # Invalid certificates will be rejected
+{tls_outgoing_options}
 sslproxy_cert_error deny all
 
 # Logging
