@@ -459,30 +459,127 @@ def write_config(config, script_dir):
 # ------------------------------------------------------------------------------
 # Service management
 # ------------------------------------------------------------------------------
+def _command_exists(command):
+    """Return True if command exists on PATH."""
+    if os.path.isabs(command):
+        return os.path.isfile(command) and os.access(command, os.X_OK)
+    for path in os.environ.get("PATH", "").split(os.pathsep):
+        if not path:
+            continue
+        candidate = os.path.join(path, command)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return True
+    return False
+
+
+def _systemd_running():
+    """Return True if systemd appears to be PID 1."""
+    if os.path.isdir("/run/systemd/system"):
+        return True
+    try:
+        with open("/proc/1/comm", "r") as handle:
+            return handle.read().strip() == "systemd"
+    except IOError:
+        return False
+
+
+def _read_pidfile(pid_path):
+    try:
+        with open(pid_path, "r") as handle:
+            return handle.read().strip()
+    except IOError:
+        return None
+
+
+def _pid_is_running(pid_value):
+    try:
+        pid_value = int(pid_value)
+    except (TypeError, ValueError):
+        return False
+    return os.path.exists("/proc/{0}".format(pid_value))
+
+
+def _squid_is_running():
+    pid_paths = ["/run/squid.pid", "/var/run/squid.pid", "/var/run/squid3.pid"]
+    for pid_path in pid_paths:
+        pid_value = _read_pidfile(pid_path)
+        if pid_value and _pid_is_running(pid_value):
+            return True
+
+    if os.path.isdir("/proc"):
+        try:
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                comm_path = os.path.join("/proc", entry, "comm")
+                try:
+                    with open(comm_path, "r") as handle:
+                        comm = handle.read().strip()
+                except IOError:
+                    continue
+                if comm.startswith("squid"):
+                    return True
+        except OSError:
+            pass
+
+    return False
+
+
 def restart_squid():
     """Restart Squid service."""
     action("Restarting Squid service...")
     step_delay()
-    ret = subprocess.call(["systemctl", "restart", "squid"])
-    if ret != 0:
-        error("Failed to restart Squid")
-        error("Check config: squid -k parse")
-        sys.exit(1)
-    success("Squid service restarted")
+    if _systemd_running() and _command_exists("systemctl"):
+        ret = subprocess.call(["systemctl", "restart", "squid"])
+        if ret == 0:
+            success("Squid service restarted")
+            return
+        warn("systemctl restart failed, falling back")
+
+    if _command_exists("service"):
+        ret = subprocess.call(["service", "squid", "restart"])
+        if ret == 0:
+            success("Squid service restarted")
+            return
+        warn("service restart failed, falling back")
+
+    ret = subprocess.call(["squid", "-k", "reconfigure"])
+    if ret == 0:
+        success("Squid reconfigured")
+        return
+
+    ret = subprocess.call(["squid", "-f", "/etc/squid/squid.conf"])
+    if ret == 0:
+        success("Squid started")
+        return
+
+    error("Failed to restart Squid")
+    error("Check config: squid -k parse")
+    sys.exit(1)
 
 
 def verify_squid():
     """Verify Squid is running."""
     info("Verifying Squid status...")
     step_delay()
-    ret = subprocess.call(
-        ["systemctl", "is-active", "--quiet", "squid"]
-    )
-    if ret != 0:
-        error("Squid is not running")
-        error("Check logs: journalctl -u squid")
-        sys.exit(1)
-    success("Squid is active and running")
+    if _systemd_running() and _command_exists("systemctl"):
+        ret = subprocess.call(
+            ["systemctl", "is-active", "--quiet", "squid"]
+        )
+        if ret != 0:
+            error("Squid is not running")
+            error("Check logs: journalctl -u squid")
+            sys.exit(1)
+        success("Squid is active and running")
+        return
+
+    if _squid_is_running():
+        success("Squid is active and running")
+        return
+
+    error("Squid is not running")
+    error("Check logs: /var/log/squid/cache.log")
+    sys.exit(1)
 
 
 # ------------------------------------------------------------------------------
