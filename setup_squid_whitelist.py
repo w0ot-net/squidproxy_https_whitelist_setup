@@ -374,19 +374,35 @@ def load_template(template_name):
         return f.read()
 
 
-def find_ca_bundle():
-    """Return path to the system CA bundle if found."""
-    candidates = [
+def find_ca_trust_sources():
+    """Return cafile, capath, and a list of trust source labels."""
+    cafile_candidates = [
         "/etc/ssl/certs/ca-certificates.crt",
         "/etc/pki/tls/certs/ca-bundle.crt",
         "/etc/ssl/ca-bundle.pem",
         "/etc/ssl/cert.pem",
         "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
     ]
-    for path in candidates:
+    capath_candidates = [
+        "/etc/ssl/certs",
+        "/etc/pki/tls/certs",
+    ]
+    cafile = None
+    for path in cafile_candidates:
         if os.path.isfile(path):
-            return path
-    return None
+            cafile = path
+            break
+    capath = None
+    for path in capath_candidates:
+        if os.path.isdir(path):
+            capath = path
+            break
+    sources = []
+    if cafile:
+        sources.append("cafile={0}".format(cafile))
+    if capath:
+        sources.append("capath={0}".format(capath))
+    return cafile, capath, sources
 
 
 def build_domain_variants(domain):
@@ -406,11 +422,18 @@ def build_domain_variants(domain):
 
 
 def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
-                    ssl_crtd_path=None, extra_ssl_ports=None, ca_bundle=None):
+                    ssl_crtd_path=None, extra_ssl_ports=None, cafile=None,
+                    capath=None):
     """Generate Squid configuration for domain whitelisting."""
     domain, _, domain_acl, domain_display = build_domain_variants(domain)
-    if ca_bundle:
-        tls_outgoing_options = "tls_outgoing_options cafile={0}".format(ca_bundle)
+    if cafile and capath:
+        tls_outgoing_options = "tls_outgoing_options cafile={0} capath={1}".format(
+            cafile, capath
+        )
+    elif cafile:
+        tls_outgoing_options = "tls_outgoing_options cafile={0}".format(cafile)
+    elif capath:
+        tls_outgoing_options = "tls_outgoing_options capath={0}".format(capath)
     else:
         tls_outgoing_options = "# tls_outgoing_options cafile=/path/to/ca-bundle (not found)"
 
@@ -621,7 +644,7 @@ def verify_squid():
 # ------------------------------------------------------------------------------
 # Main
 # ------------------------------------------------------------------------------
-def print_summary(domain, port, ssl_bump_mode, cert_path):
+def print_summary(domain, port, ssl_bump_mode, cert_path, trust_sources=None):
     """Print configuration summary."""
     _, apex_domain, _, domain_display = build_domain_variants(domain)
     allowed_host = apex_domain or domain.lstrip(".") or domain
@@ -643,13 +666,18 @@ def print_summary(domain, port, ssl_bump_mode, cert_path):
     elif ssl_bump_mode == "verify":
         print("  {cyan}SSL Bump:{reset}       {green}verify{reset} (certificate validation ON)".format(
             cyan=C_CYAN, reset=C_RESET, green=C_GREEN))
-        print("  {cyan}CA Certificate:{reset} {cert}".format(
+        print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
             cyan=C_CYAN, reset=C_RESET, cert=cert_path))
+        if trust_sources:
+            print("  {cyan}Outgoing TLS Trust:{reset} {sources}".format(
+                cyan=C_CYAN, reset=C_RESET, sources=", ".join(trust_sources)))
     elif ssl_bump_mode == "noverify":
         print("  {cyan}SSL Bump:{reset}       {yellow}noverify{reset} (certificate validation OFF)".format(
             cyan=C_CYAN, reset=C_RESET, yellow=C_YELLOW))
-        print("  {cyan}CA Certificate:{reset} {cert}".format(
+        print("  {cyan}Bump CA Certificate:{reset} {cert}".format(
             cyan=C_CYAN, reset=C_RESET, cert=cert_path))
+        print("  {cyan}Outgoing TLS Trust:{reset} {dim}disabled{reset}".format(
+            cyan=C_CYAN, reset=C_RESET, dim=C_DIM))
 
     print("")
     print("  {dim}Test commands:{reset}".format(dim=C_DIM, reset=C_RESET))
@@ -723,7 +751,9 @@ Examples:
     ssl_bump_mode = args.ssl_bump
     cert_path = None
     key_path = None
-    ca_bundle = None
+    cafile = None
+    capath = None
+    trust_sources = None
 
     # Run setup
     banner()
@@ -790,16 +820,16 @@ Examples:
         ssl_crtd_path = None
 
     if ssl_bump_mode == "verify":
-        ca_bundle = find_ca_bundle()
-        if ca_bundle:
-            info("Using system CA bundle: {0}".format(ca_bundle))
+        cafile, capath, trust_sources = find_ca_trust_sources()
+        if trust_sources:
+            info("Using system CA trust: {0}".format(", ".join(trust_sources)))
         else:
-            warn("System CA bundle not found; TLS validation may fail")
+            warn("System CA trust not found; TLS validation may fail")
 
     # Generate and write configuration
     backup_config()
     config = generate_config(domain, args.port, ssl_bump_mode, cert_path, key_path,
-                             ssl_crtd_path, args.ssl_port, ca_bundle)
+                             ssl_crtd_path, args.ssl_port, cafile, capath)
     write_config(config, script_dir)
     print("")
 
@@ -813,7 +843,7 @@ Examples:
         cert_dir = get_cert_dir(script_dir)
         display_cert = os.path.join(cert_dir, "squid-ca-cert.pem")
 
-    print_summary(domain, args.port, ssl_bump_mode, display_cert)
+    print_summary(domain, args.port, ssl_bump_mode, display_cert, trust_sources)
 
 
 if __name__ == "__main__":
