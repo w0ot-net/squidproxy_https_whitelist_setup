@@ -456,8 +456,8 @@ def generate_config(domain, port, ssl_bump_mode, cert_path, key_path,
         tls_outgoing_options = "# tls_outgoing_options cafile=/path/to/ca-bundle (not found)"
 
     # Build SSL ports list
-    ssl_ports_lines = "acl SSL_ports port 443"
-    safe_ports_lines = "acl Safe_ports port 80\nacl Safe_ports port 443"
+    ssl_ports_lines = "acl SSL_ports port 443\nacl SSL_ports port 8443"
+    safe_ports_lines = "acl Safe_ports port 80\nacl Safe_ports port 443\nacl Safe_ports port 8443"
     if extra_ssl_ports:
         for ssl_port in extra_ssl_ports:
             ssl_ports_lines += "\nacl SSL_ports port {0}".format(ssl_port)
