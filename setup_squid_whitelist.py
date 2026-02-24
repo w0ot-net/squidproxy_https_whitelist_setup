@@ -429,7 +429,7 @@ def build_domain_variants(domain):
     if not apex:
         return domain, "", domain, domain
     wildcard = "." + apex
-    domain_acl = apex
+    domain_acl = "{0} {1}".format(apex, wildcard)
     display = "{0} and *.{0}".format(apex)
     return wildcard, apex, domain_acl, display
 
