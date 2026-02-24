@@ -60,7 +60,7 @@ acl step2 at_step SslBump2
 acl step3 at_step SslBump3
 
 # SNI-based whitelist (matches TLS Server Name Indication)
-acl whitelist_sni ssl::server_name {domain_acl}
+acl whitelist_sni ssl::server_name {domain}
 
 # Peek at SNI in step 1
 ssl_bump peek step1
